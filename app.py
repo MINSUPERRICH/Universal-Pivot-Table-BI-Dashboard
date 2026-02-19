@@ -1,107 +1,76 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.express as px
-from io import BytesIO
 
-# --- 1. CONFIGURATION & PERMISSIONS ---
-st.set_page_config(page_title="AI-BI Command Center", layout="wide")
-
-# User Database
-USERS = {
-    "rich": {"password": "777", "role": "admin"},
-    "staff": {"password": "123", "role": "team"}
-}
-
-# --- 2. DEFINE FUNCTIONS FIRST (To avoid NameError) ---
+# --- 1. USER DATABASE INITIALIZATION ---
+# We use session_state to store the "live" password list so it can be changed
+if "user_db" not in st.session_state:
+    st.session_state["user_db"] = {
+        "rich": {"password": "777", "role": "admin"},
+        "staff": {"password": "123", "role": "team"}
+    }
 
 def check_password():
-    """Returns True if the user has a correct username and password."""
     def password_entered():
         user = st.session_state["username"]
         pwd = st.session_state["password_input"]
-        if user in USERS and USERS[user]["password"] == pwd:
+        db = st.session_state["user_db"]
+        
+        if user in db and db[user]["password"] == pwd:
             st.session_state["password_correct"] = True
-            st.session_state["user_role"] = USERS[user]["role"]
+            st.session_state["user_role"] = db[user]["role"]
+            st.session_state["logged_in_user"] = user
             del st.session_state["password_input"] 
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
+        st.title("🔒 Business Intelligence Login")
         st.text_input("Username", key="username")
         st.text_input("Password", type="password", on_change=password_entered, key="password_input")
         return False
     elif not st.session_state["password_correct"]:
         st.text_input("Username", key="username")
         st.text_input("Password", type="password", on_change=password_entered, key="password_input")
-        st.error("😕 User not found or password incorrect")
+        st.error("😕 Access Denied: Check username or password")
         return False
     return True
 
-def clean_my_data(df):
-    """Basic data cleaning engine."""
-    df = df.drop_duplicates()
-    df.columns = df.columns.str.strip()
-    for col in df.columns:
-        if any(keyword in col.lower() for keyword in ['date', 'trans', 'posted']):
-            df[col] = pd.to_datetime(df[col], errors='coerce')
-    return df
-
-# --- 3. MAIN APP LOGIC ---
-
+# --- 2. MAIN APP ---
 if check_password():
     role = st.session_state["user_role"]
-    st.sidebar.success(f"Logged in as: {role.upper()}")
-    st.title("💎 Dynamic BI Command Center")
+    current_user = st.session_state["logged_in_user"]
     
-    # File Upload (Admin Only)
-    if role == "admin":
-        uploaded_file = st.sidebar.file_uploader("Upload Data File", type=['csv', 'xlsx'])
-    else:
-        st.sidebar.info("Standard View: Data is managed by Admin.")
-        uploaded_file = None
+    st.sidebar.title(f"Welcome, {current_user.title()}")
+    st.sidebar.info(f"Access Level: {role.upper()}")
 
-    if uploaded_file:
-        # Load Data
-        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+    # Add a new tab specifically for Security/Settings
+    tab_dash, tab_settings = st.tabs(["📊 BI Dashboard", "⚙️ Account Settings"])
+
+    with tab_dash:
+        st.header("Your Data Insights")
+        st.write("Upload and analyze your files here as we set up before.")
+        # [Insert previous dashboard/cleaning/pivot logic here]
+
+    with tab_settings:
+        st.header("Security Center")
+        st.subheader("Change Your Password")
         
-        # Cleaning Toggle
-        if role == "admin" and st.sidebar.button("🧼 Run One-Click Clean"):
-            df = clean_my_data(df)
-            st.sidebar.success("Data Cleaned!")
-
-        # Dynamic KPI Logic
-        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-        
-        if numeric_cols:
-            st.sidebar.divider()
-            selected_kpis = st.sidebar.multiselect("Select KPIs", options=numeric_cols, default=numeric_cols[:1])
-            agg_method = st.sidebar.selectbox("Calculation Method", ["sum", "mean", "count"])
-
-            # Render KPI Cards
-            st.subheader("📌 Current Performance")
-            kpi_cols = st.columns(len(selected_kpis) if selected_kpis else 1)
-            for i, kpi in enumerate(selected_kpis):
-                val = df[kpi].agg(agg_method)
-                label = f"{agg_method.title()} {kpi}"
-                if any(word in kpi.lower() for word in ['price', 'sale', 'cost']):
-                    kpi_cols[i].metric(label, f"${val:,.2f}")
-                else:
-                    kpi_cols[i].metric(label, f"{val:,.0f}")
-
-            # Dynamic Charting
-            st.divider()
-            group_col = st.sidebar.selectbox("Breakdown By", df.columns)
-            fig = px.bar(df.groupby(group_col)[selected_kpis[0]].agg(agg_method).reset_index(), 
-                         x=group_col, y=selected_kpis[0], color_discrete_sequence=['#4eb8b8'], template="plotly_white")
-            st.plotly_chart(fig, use_container_width=True)
-
-        with st.expander("🔍 Preview Data"):
-            st.write(df.head(20))
+        with st.form("password_change_form"):
+            new_pwd = st.text_input("New Password", type="password")
+            confirm_pwd = st.text_input("Confirm New Password", type="password")
+            submit_change = st.form_submit_button("Update Password")
             
-    else:
-        st.info("👋 Admin, please upload a file to begin.")
+            if submit_change:
+                if new_pwd == confirm_pwd and len(new_pwd) > 0:
+                    # Update the live database in session state
+                    st.session_state["user_db"][current_user]["password"] = new_pwd
+                    st.success("✅ Password updated successfully! It will be active until the session ends.")
+                elif new_pwd != confirm_pwd:
+                    st.error("❌ Passwords do not match.")
+                else:
+                    st.error("❌ Password cannot be empty.")
 
-    if st.sidebar.button("Log Out"):
+    # Log out button at the bottom of the sidebar
+    if st.sidebar.button("Logout"):
         st.session_state.clear()
         st.rerun()
