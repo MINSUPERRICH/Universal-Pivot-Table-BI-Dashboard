@@ -3,95 +3,99 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from io import BytesIO
-from pptx import Presentation
-from pptx.util import Inches
 
 # --- SETUP ---
-st.set_page_config(page_title="AI Decision Hub", layout="wide")
+st.set_page_config(page_title="AI-BI Command Center", layout="wide")
 
+# Custom Styling
 st.markdown("""
     <style>
     .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; border-bottom: 4px solid #4eb8b8; }
-    .forecast-box { background-color: #e0f2f2; padding: 20px; border-radius: 10px; border: 1px dashed #4eb8b8; }
+    .dictionary-card { background-color: #f1f3f4; padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 5px solid #4eb8b8; }
     </style>
     """, unsafe_allow_html=True)
 
-# 1. Password Check
+# 1. Password Protection
 def check_password():
     if "password_correct" not in st.session_state:
         st.text_input("Password", type="password", on_change=lambda: st.session_state.update({"password_correct": st.session_state.password == "rich"}), key="password")
         return False
     return st.session_state["password_correct"]
 
+# 2. Data Cleaning Function
+def clean_my_data(df):
+    df = df.drop_duplicates()
+    df.columns = df.columns.str.strip()
+    for col in df.columns:
+        if any(keyword in col.lower() for keyword in ['date', 'trans', 'posted']):
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    return df
+
+# 3. Data Dictionary Logic
+def generate_dictionary(df):
+    dict_data = []
+    for col in df.columns:
+        dtype = str(df[col].dtype)
+        # Simple AI-style logic to guess description
+        desc = "General Information"
+        if "id" in col.lower(): desc = "Unique Identifier for the record"
+        elif "sale" in col.lower() or "price" in col.lower(): desc = "Financial value in currency"
+        elif "date" in col.lower(): desc = "Time-based stamp for the transaction"
+        elif "cat" in col.lower(): desc = "Group or Type for classification"
+        
+        dict_data.append({"Column": col, "Type": dtype, "Description": desc})
+    return pd.DataFrame(dict_data)
+
+# --- APP START ---
 if check_password():
-    st.title("💎 AI Decision & Forecast Hub")
+    st.title("💎 AI-BI Command Center")
     
-    st.sidebar.header("📁 Data Upload")
-    main_file = st.sidebar.file_uploader("Upload Historical Sales", type=['csv', 'xlsx'])
+    st.sidebar.header("📁 Step 1: Upload")
+    main_file = st.sidebar.file_uploader("Upload Data", type=['csv', 'xlsx'])
 
     if main_file:
-        df = pd.read_csv(main_file) if main_file.name.endswith('.csv') else pd.read_excel(main_file)
+        raw_df = pd.read_csv(main_file) if main_file.name.endswith('.csv') else pd.read_excel(main_file)
         
-        # Ensure Date column
-        date_col = st.sidebar.selectbox("Date Column", df.columns)
-        df[date_col] = pd.to_datetime(df[date_col])
-        val_col = st.sidebar.selectbox("Value Column (Sales)", df.select_dtypes(include='number').columns)
-
-        # --- KPI & COMPARISON LOGIC ---
-        latest_date = df[date_col].max()
-        current_month = df[df[date_col].dt.to_period('M') == latest_date.to_period('M')]
-        prev_month = df[df[date_col].dt.to_period('M') == (latest_date - pd.DateOffset(months=1)).to_period('M')]
-
-        st.subheader(f"📊 Performance vs. Last Month ({latest_date.strftime('%B %Y')})")
-        k1, k2, k3 = st.columns(3)
-        
-        curr_total = current_month[val_col].sum()
-        prev_total = prev_month[val_col].sum()
-        diff = curr_total - prev_total
-        
-        k1.metric("Current Sales", f"${curr_total:,.0f}", f"{diff:,.0f} vs LM")
-        k2.metric("Orders", f"{len(current_month):,}", f"{len(current_month)-len(prev_month)} vs LM")
-        k3.metric("Avg Ticket", f"${(curr_total/len(current_month) if len(current_month)>0 else 0):,.2f}")
-
-        # --- AI FORECASTING SECTION ---
-        st.divider()
-        st.subheader("🔮 AI Trend Forecasting")
-        
-        # Prepare data for simple linear forecast
-        daily_sales = df.groupby(date_col)[val_col].sum().reset_index()
-        daily_sales['day_index'] = np.arange(len(daily_sales))
-        
-        # Simple Linear Regression (Trendline)
-        z = np.polyfit(daily_sales['day_index'], daily_sales[val_col], 1)
-        p = np.poly1d(z)
-        
-        # Predict next 30 days
-        next_days = np.arange(len(daily_sales), len(daily_sales) + 30)
-        predictions = p(next_days)
-        forecast_total = predictions.sum()
-
-        col_f1, col_f2 = st.columns([1, 2])
-        with col_f1:
-            st.markdown(f"""
-            <div class="forecast-box">
-                <h4>Next 30 Days Forecast</h4>
-                <h2 style="color: #4eb8b8;">${forecast_total:,.0f}</h2>
-                <p>Based on your historical growth trend, the AI expects this volume for the coming month.</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col_f2:
-            # Chart showing history + forecast
-            hist_trace = px.line(daily_sales, x=date_col, y=val_col, title="Sales History & Trend")
-            hist_trace.update_traces(line_color='#d1d1d1')
-            st.plotly_chart(hist_trace, use_container_width=True)
-
-        # --- REPORTING ---
+        # Sidebar Controls
         st.sidebar.divider()
-        st.sidebar.header("🎬 Final Reports")
-        # Export logic remains same as previous versions
-        st.sidebar.button("Generate PowerPoint Deck")
-        st.sidebar.button("Download Merged Excel")
+        if st.sidebar.button("🧼 Run One-Click Clean"):
+            df = clean_my_data(raw_df)
+            st.sidebar.success("Data Cleaned!")
+        else:
+            df = raw_df
 
+        # TABS FOR ORGANIZATION
+        tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "📖 Data Dictionary", "🔍 Raw Data"])
+
+        with tab1:
+            st.subheader("Live Performance Overview")
+            num_cols = df.select_dtypes(include='number').columns.tolist()
+            if num_cols:
+                kpi_val = st.sidebar.selectbox("KPI Metric", num_cols)
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Total Sum", f"${df[kpi_val].sum():,.2f}")
+                c2.metric("Avg Value", f"${df[kpi_val].mean():,.2f}")
+                c3.metric("Row Count", f"{len(df):,}")
+
+                chart_col = st.sidebar.selectbox("Group By", df.columns)
+                fig = px.bar(df.groupby(chart_col)[kpi_val].sum().reset_index(), 
+                             x=chart_col, y=kpi_val, color_discrete_sequence=['#4eb8b8'], template="plotly_white")
+                st.plotly_chart(fig, use_container_width=True)
+
+        with tab2:
+            st.subheader("Data Dictionary")
+            st.markdown("Use this to understand what each column represents.")
+            data_dict = generate_dictionary(df)
+            for _, row in data_dict.iterrows():
+                st.markdown(f"""
+                <div class="dictionary-card">
+                    <strong>Column: {row['Column']}</strong><br>
+                    <small>Type: {row['Type']} | Purpose: {row['Description']}</small>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with tab3:
+            st.dataframe(df, use_container_width=True)
+            
     else:
-        st.info("Upload your jewelry sales file to see AI predictions.")
+        st.info("Please upload a file to begin.")
