@@ -58,7 +58,6 @@ if check_password():
 
     uploaded_files = st.sidebar.file_uploader("Upload Data Files", type=['csv', 'xlsx'], accept_multiple_files=True)
     
-    # Initialize a blank figure to prevent PPT errors
     fig = None 
 
     if uploaded_files:
@@ -79,7 +78,6 @@ if check_password():
                 col = st.sidebar.selectbox("Select KPI", num_cols)
                 grp = st.sidebar.selectbox("Group By", working_df.columns)
                 
-                # Assign chart to 'fig' variable
                 fig = px.bar(working_df.groupby(grp)[col].sum().reset_index(), x=grp, y=col, color_discrete_sequence=['#4eb8b8'])
                 fig.update_layout(template="plotly_white")
                 st.plotly_chart(fig, use_container_width=True)
@@ -124,12 +122,24 @@ if check_password():
             
             if st.button("Apply Instruction"):
                 try:
-                    # Apply the user's specific text condition
                     filtered_df = working_df.query(filter_query)
                     st.success(f"Found {len(filtered_df)} matching rows!")
+                    
+                    # --- NEW: SUMMARY STATISTICS ---
+                    filter_num_cols = filtered_df.select_dtypes('number').columns.tolist()
+                    if filter_num_cols:
+                        # Use the KPI selected in the sidebar, or default to the first numeric column
+                        stat_kpi = col if 'col' in locals() and col in filter_num_cols else filter_num_cols[0]
+                        
+                        st.write(f"**Quick Stats for: {stat_kpi}**")
+                        s_col1, s_col2, s_col3 = st.columns(3)
+                        s_col1.metric("Total (Sum)", f"{filtered_df[stat_kpi].sum():,.2f}")
+                        s_col2.metric("Average", f"{filtered_df[stat_kpi].mean():,.2f}")
+                        s_col3.metric("Max Value", f"{filtered_df[stat_kpi].max():,.2f}")
+                    # -------------------------------
+                    
                     st.dataframe(filtered_df, use_container_width=True)
                     
-                    # Create a specific download button for these filtered results
                     csv_data = filtered_df.to_csv(index=False).encode('utf-8')
                     st.download_button(
                         label="📥 Download Filtered Results",
@@ -140,7 +150,6 @@ if check_password():
                 except Exception as e:
                     st.error("Could not apply filter. Please check your spelling or formatting. (Hint: Text values need quotes, like `Sector == 'Tech'`)")
             
-            # Generic download button for the full merged data
             if st.session_state["master_df"] is not None and not filter_query:
                 st.download_button(
                     "📥 Download Full Merged Data", 
