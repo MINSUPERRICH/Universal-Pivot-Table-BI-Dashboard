@@ -113,6 +113,11 @@ if check_password():
                     st.session_state["master_df"] = new_merged_df
                     st.success("Files Linked Successfully!")
 
+            # --- NEW: PERMANENT DATA PREVIEW ---
+            if st.session_state["master_df"] is not None:
+                st.write("**👁️ Preview of Linked Data (First 50 Rows):**")
+                st.dataframe(st.session_state["master_df"].head(50), use_container_width=True)
+
             # 2. Advanced Instruction & Filter Section
             st.divider()
             st.subheader("🔍 Deep Dive & Filter")
@@ -125,10 +130,9 @@ if check_password():
                     filtered_df = working_df.query(filter_query)
                     st.success(f"Found {len(filtered_df)} matching rows!")
                     
-                    # --- NEW: SUMMARY STATISTICS ---
+                    # SUMMARY STATISTICS
                     filter_num_cols = filtered_df.select_dtypes('number').columns.tolist()
                     if filter_num_cols:
-                        # Use the KPI selected in the sidebar, or default to the first numeric column
                         stat_kpi = col if 'col' in locals() and col in filter_num_cols else filter_num_cols[0]
                         
                         st.write(f"**Quick Stats for: {stat_kpi}**")
@@ -136,7 +140,6 @@ if check_password():
                         s_col1.metric("Total (Sum)", f"{filtered_df[stat_kpi].sum():,.2f}")
                         s_col2.metric("Average", f"{filtered_df[stat_kpi].mean():,.2f}")
                         s_col3.metric("Max Value", f"{filtered_df[stat_kpi].max():,.2f}")
-                    # -------------------------------
                     
                     st.dataframe(filtered_df, use_container_width=True)
                     
