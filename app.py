@@ -52,21 +52,20 @@ def check_password():
 if check_password():
     st.sidebar.title(f"Welcome, {st.session_state['user'].title()}")
     
-    # GLOBAL TABS
     tab_dash, tab_pivot, tab_merge, tab_ppt, tab_settings = st.tabs([
         "📊 Dashboard", "🧮 Pivot Table", "🔗 Link & Match", "🎬 PPT Designer", "⚙️ Settings"
     ])
 
-    # FIXED: Added 'accept_multiple_files=True' so you can upload 2+ files for VLOOKUP
     uploaded_files = st.sidebar.file_uploader("Upload Data Files", type=['csv', 'xlsx'], accept_multiple_files=True)
+    
+    # Initialize a blank figure to prevent PPT errors
+    fig = None 
 
     if uploaded_files:
-        # Load all uploaded files into a dictionary
         data_dict = {}
         for f in uploaded_files:
             data_dict[f.name] = pd.read_excel(f) if f.name.endswith('xlsx') else pd.read_csv(f)
         
-        # If no merge has happened, default to the first uploaded file
         if st.session_state["master_df"] is None or len(uploaded_files) == 1:
             st.session_state["master_df"] = list(data_dict.values())[0]
             
@@ -79,21 +78,26 @@ if check_password():
             if num_cols:
                 col = st.sidebar.selectbox("Select KPI", num_cols)
                 grp = st.sidebar.selectbox("Group By", working_df.columns)
+                
+                # Assign chart to 'fig' variable
                 fig = px.bar(working_df.groupby(grp)[col].sum().reset_index(), x=grp, y=col, color_discrete_sequence=['#4eb8b8'])
+                fig.update_layout(template="plotly_white")
                 st.plotly_chart(fig, use_container_width=True)
 
         # --- PIVOT TABLE TAB ---
         with tab_pivot:
             st.header("Data Pivot Summary")
-            st.dataframe(working_df.groupby(grp)[col].sum(), use_container_width=True)
+            if num_cols:
+                st.dataframe(working_df.groupby(grp)[col].sum(), use_container_width=True)
 
         # --- LINK & MATCH (VLOOKUP) TAB ---
         with tab_merge:
             st.header("🔗 Link & Match (VLOOKUP)")
+            
+            # 1. Merging Section
             if len(data_dict) < 2:
-                st.info("To use Link & Match, please drag and drop at least TWO files into the sidebar uploader.")
+                st.info("Upload at least TWO files in the sidebar to merge them.")
             else:
-                st.write("Merge two files together using a common Key column.")
                 col1, col2 = st.columns(2)
                 with col1:
                     base_file = st.selectbox("1. Main File", list(data_dict.keys()))
@@ -109,25 +113,54 @@ if check_password():
                 if st.button("Run VLOOKUP Match"):
                     new_merged_df = pd.merge(data_dict[base_file], data_dict[merge_file], left_on=left_on, right_on=right_on, how='left')
                     st.session_state["master_df"] = new_merged_df
-                    st.success("Successfully linked! Your Dashboard and Pivot Table are now using the combined data.")
-                    st.dataframe(new_merged_df.head(10))
+                    st.success("Files Linked Successfully!")
+
+            # 2. Advanced Instruction & Filter Section
+            st.divider()
+            st.subheader("🔍 Deep Dive & Filter")
+            st.write("Write an instruction to filter your current data. *(e.g., `close > 150` or `ticker == 'AAPL'`)*")
+            
+            filter_query = st.text_input("Filter Instruction:")
+            
+            if st.button("Apply Instruction"):
+                try:
+                    # Apply the user's specific text condition
+                    filtered_df = working_df.query(filter_query)
+                    st.success(f"Found {len(filtered_df)} matching rows!")
+                    st.dataframe(filtered_df, use_container_width=True)
+                    
+                    # Create a specific download button for these filtered results
+                    csv_data = filtered_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="📥 Download Filtered Results",
+                        data=csv_data,
+                        file_name="Filtered_Data_Results.csv",
+                        mime="text/csv"
+                    )
+                except Exception as e:
+                    st.error("Could not apply filter. Please check your spelling or formatting. (Hint: Text values need quotes, like `Sector == 'Tech'`)")
+            
+            # Generic download button for the full merged data
+            if st.session_state["master_df"] is not None and not filter_query:
+                st.download_button(
+                    "📥 Download Full Merged Data", 
+                    st.session_state["master_df"].to_csv(index=False).encode('utf-8'), 
+                    "Full_Merged_Dataset.csv"
+                )
 
         # --- PPT DESIGNER TAB ---
         with tab_ppt:
             st.header("PPT Presentation Designer")
-            p_title = st.text_input("Slide Title", "Business Review")
-            p_insight = st.text_area("Observations", "Add your meeting notes here.")
-            if st.button("Generate Presentation"):
-                ppt_data = generate_advanced_ppt(fig, p_title, p_insight)
-                st.download_button("📥 Download PowerPoint", ppt_data, "Meeting_Deck.pptx")
+            if fig is not None:
+                p_title = st.text_input("Slide Title", "Business Review")
+                p_insight = st.text_area("Observations", "Add your meeting notes here.")
+                if st.button("Generate Presentation"):
+                    ppt_data = generate_advanced_ppt(fig, p_title, p_insight)
+                    st.download_button("📥 Download PowerPoint", ppt_data, "Meeting_Deck.pptx")
+            else:
+                st.warning("Please configure your chart in the 'Dashboard' tab first.")
     else:
-        with tab_dash: st.info("Please upload a file in the sidebar to begin analysis.")
-        with tab_ppt: st.warning("Presentation Designer requires an active data chart.")
-
-    # --- SETTINGS TAB ---
-    with tab_settings:
-        st.header("Settings")
-        st.write("Change password or manage your account here.")
+        st.info("Please upload your data in the sidebar to begin.")
 
     if st.sidebar.button("Logout"):
         st.session_state.clear()
