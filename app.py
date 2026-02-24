@@ -113,7 +113,6 @@ if check_password():
                     st.session_state["master_df"] = new_merged_df
                     st.success("Files Linked Successfully!")
 
-            # --- NEW: PERMANENT DATA PREVIEW ---
             if st.session_state["master_df"] is not None:
                 st.write("**👁️ Preview of Linked Data (First 50 Rows):**")
                 st.dataframe(st.session_state["master_df"].head(50), use_container_width=True)
@@ -121,18 +120,57 @@ if check_password():
             # 2. Advanced Instruction & Filter Section
             st.divider()
             st.subheader("🔍 Deep Dive & Filter")
-            st.write("Write an instruction to filter your current data. *(e.g., `close > 150` or `ticker == 'AAPL'`)*")
             
-            filter_query = st.text_input("Filter Instruction:")
+            use_date_filter = st.toggle("📅 Enable Date Filter")
+            selected_dates = None
+            date_col = None
             
-            if st.button("Apply Instruction"):
+            if use_date_filter:
+                date_col = st.selectbox("Select Date Column", working_df.columns)
+                temp_dates = pd.to_datetime(working_df[date_col], errors='coerce')
+                
+                if temp_dates.notna().any():
+                    min_date = temp_dates.min().date()
+                    max_date = temp_dates.max().date()
+                    selected_dates = st.date_input(
+                        "Select Date Range", 
+                        value=(min_date, max_date), 
+                        min_value=min_date, 
+                        max_value=max_date
+                    )
+                else:
+                    st.warning("⚠️ The selected column doesn't seem to contain valid dates. Please select a different column.")
+
+            with st.expander("💡 Instruction Cheat Sheet (Click to open)"):
+                st.markdown("""
+                **How to write filter instructions:**
+                * **Numbers:** Use `>`, `<`, `==` (equals). Example: `close > 150` or `volume == 5000`
+                * **Text/Words:** Use `==` and put the word in double quotes. Example: `ticker == "AAPL"` or `Sector == "Technology"`
+                * **Multiple Rules (AND/OR):** Use `and` or `or`. Example: `close > 150 and ticker == "AAPL"`
+                * *Note: Column names must be typed exactly as they appear in the preview table above!*
+                """)
+            
+            filter_query = st.text_input("Filter Instruction (Optional if using Dates):")
+            
+            if st.button("Apply Filters"):
                 try:
-                    filtered_df = working_df.query(filter_query)
+                    filtered_df = working_df.copy()
+                    
+                    if use_date_filter and selected_dates and len(selected_dates) == 2:
+                        start_date, end_date = selected_dates
+                        filtered_df[date_col] = pd.to_datetime(filtered_df[date_col], errors='coerce')
+                        filtered_df = filtered_df[
+                            (filtered_df[date_col].dt.date >= start_date) & 
+                            (filtered_df[date_col].dt.date <= end_date)
+                        ]
+                    
+                    if filter_query:
+                        filtered_df = filtered_df.query(filter_query)
+                        
                     st.success(f"Found {len(filtered_df)} matching rows!")
                     
-                    # SUMMARY STATISTICS
                     filter_num_cols = filtered_df.select_dtypes('number').columns.tolist()
-                    if filter_num_cols:
+                    if filter_num_cols and not filtered_df.empty:
                         stat_kpi = col if 'col' in locals() and col in filter_num_cols else filter_num_cols[0]
                         
                         st.write(f"**Quick Stats for: {stat_kpi}**")
@@ -143,22 +181,50 @@ if check_password():
                     
                     st.dataframe(filtered_df, use_container_width=True)
                     
+                    # --- NEW: DUAL EXPORT BUTTONS (CSV & EXCEL) ---
+                    st.write("**Export Filtered Data:**")
+                    dl_col1, dl_col2 = st.columns(2)
+                    
+                    # 1. CSV Prep
                     csv_data = filtered_df.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="📥 Download Filtered Results",
-                        data=csv_data,
-                        file_name="Filtered_Data_Results.csv",
-                        mime="text/csv"
-                    )
+                    
+                    # 2. Excel Prep (Using in-memory buffer)
+                    excel_buffer = BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                        # Make timezone-aware datetimes timezone-naive so Excel accepts them
+                        df_to_export = filtered_df.copy()
+                        for c in df_to_export.select_dtypes(include=['datetimetz']).columns:
+                            df_to_export[c] = df_to_export[c].dt.tz_localize(None)
+                        df_to_export.to_excel(writer, index=False, sheet_name='Filtered Data')
+                    excel_data = excel_buffer.getvalue()
+                    
+                    with dl_col1:
+                        st.download_button("📥 Download CSV", data=csv_data, file_name="Filtered_Data.csv", mime="text/csv")
+                    with dl_col2:
+                        st.download_button("📊 Download Excel", data=excel_data, file_name="Filtered_Data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    # ----------------------------------------------
+                    
                 except Exception as e:
-                    st.error("Could not apply filter. Please check your spelling or formatting. (Hint: Text values need quotes, like `Sector == 'Tech'`)")
+                    st.error("Could not apply filter. Please check your spelling or formatting against the Cheat Sheet. (Hint: Text values need quotes, like `Sector == 'Tech'`)")
             
-            if st.session_state["master_df"] is not None and not filter_query:
-                st.download_button(
-                    "📥 Download Full Merged Data", 
-                    st.session_state["master_df"].to_csv(index=False).encode('utf-8'), 
-                    "Full_Merged_Dataset.csv"
-                )
+            # Export options for unfiltered merged data
+            if st.session_state["master_df"] is not None and not filter_query and not use_date_filter:
+                st.write("**Export Full Merged Data:**")
+                f_csv = st.session_state["master_df"].to_csv(index=False).encode('utf-8')
+                
+                f_excel_buffer = BytesIO()
+                with pd.ExcelWriter(f_excel_buffer, engine='xlsxwriter') as writer:
+                    df_to_export_full = st.session_state["master_df"].copy()
+                    for c in df_to_export_full.select_dtypes(include=['datetimetz']).columns:
+                        df_to_export_full[c] = df_to_export_full[c].dt.tz_localize(None)
+                    df_to_export_full.to_excel(writer, index=False, sheet_name='Merged Data')
+                f_excel = f_excel_buffer.getvalue()
+                
+                f_col1, f_col2 = st.columns(2)
+                with f_col1:
+                    st.download_button("📥 Download Full CSV", f_csv, "Full_Merged_Dataset.csv")
+                with f_col2:
+                    st.download_button("📊 Download Full Excel", f_excel, "Full_Merged_Dataset.xlsx")
 
         # --- PPT DESIGNER TAB ---
         with tab_ppt:
